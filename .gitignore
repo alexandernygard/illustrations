@@ -1,5 +1,3 @@
 node_modules
-gallery
-*.png
-!examples/*.png
+dist
 .DS_Store

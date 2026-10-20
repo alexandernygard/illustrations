@@ -1,31 +1,35 @@
 {
-  "name": "site-cover",
+  "name": "@alexandernygard/illustrations",
   "version": "0.1.0",
-  "description": "Cohesive, artistic cover images (og:image) for Alex's projects, driven by a small JSON spec.",
+  "description": "Generative illustrations in one house style: 29 motifs, a shared palette, and compose(spec) \u2192 SVG.",
+  "license": "MIT",
+  "author": "Alexander Nyg\u00e5rd",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alexandernygard/illustrations.git"
+  },
   "type": "module",
-  "private": true,
-  "bin": {
-    "site-cover": "src/cli.ts"
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "bun": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
   },
+  "files": [
+    "dist",
+    "src"
+  ],
   "scripts": {
-    "gallery": "bun src/cli.ts gallery -o gallery",
-    "check": "tsc --noEmit -p ."
+    "build": "bun build src/index.ts --outdir dist --target browser --format esm && tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit -p .",
+    "prepublishOnly": "bun run check && bun run build"
   },
-  "dependencies": {
-    "@resvg/resvg-js": "^2.6.2",
-    "sharp": "^0.35.5"
+  "publishConfig": {
+    "access": "public"
   },
   "devDependencies": {
     "@types/bun": "latest",
     "typescript": "^5"
-  },
-  "exports": {
-    ".": "./src/index.ts",
-    "./render": "./src/render.ts"
-  },
-  "files": [
-    "src",
-    "fonts",
-    "skill"
-  ]
+  }
 }
