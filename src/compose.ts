@@ -4,7 +4,7 @@
 
 import { accents, colors, companions, themes, type AccentName, type ThemeName } from "./palette";
 import { motifs, type MotifName } from "./motifs";
-import { makeNoise, makeRng } from "./rng";
+import { hash, makeNoise, makeRng } from "./rng";
 import { esc, f } from "./geom";
 
 export const sizes = {
@@ -26,12 +26,38 @@ export type Spec = {
   accent2?: AccentName;
   /** Changes the random details; defaults to the title. */
   seed?: string;
-  size?: keyof typeof sizes;
-  /** split: art right, text left. art: centred art, no text. */
+  /** A preset, or any "WIDTHxHEIGHT" such as "1920x800". */
+  size?: keyof typeof sizes | `${number}x${number}`;
+  /** split: art right, text left. art: art only, no text. */
   layout?: "split" | "art";
+  /** Where the art sits in an art layout. Defaults to centre. */
+  position?: "left" | "center" | "right" | "top" | "bottom";
+  /** Fade the art out on the side away from it, where page content sits. On by default when position is off-centre. */
+  fade?: boolean;
+  /** "none" leaves the background transparent, to sit on a page's own colour. */
+  background?: "theme" | "none";
+  /** Colour haze and paper grain. On by default. */
+  texture?: boolean;
+  /** Prefix for ids inside the SVG. Defaults to one derived from the spec, so inline SVGs don't clash. */
+  idPrefix?: string;
   /** Line drawing of the project's subject, as SVG elements in a 0 0 100 100 box. */
   subject?: string;
 };
+
+/** Pixel size for a preset name or a "WIDTHxHEIGHT" string. */
+export function parseSize(size: string): [number, number] {
+  if (size in sizes) return [...sizes[size as keyof typeof sizes]];
+  const m = /^(\d{2,5})x(\d{2,5})$/.exec(size);
+  if (!m) throw new Error(`Unknown size "${size}". Use one of ${Object.keys(sizes).join(", ")} or WIDTHxHEIGHT, e.g. 1920x800`);
+  return [Number(m[1]), Number(m[2])];
+}
+
+/** Prefix every id and its url(#...) references, so several SVGs can share a page. */
+function prefixIds(svg: string, prefix: string): string {
+  const ids = [...svg.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]!);
+  for (const id of new Set(ids)) svg = svg.replaceAll(`id="${id}"`, `id="${prefix}-${id}"`).replaceAll(`url(#${id})`, `url(#${prefix}-${id})`);
+  return svg;
+}
 
 export const FONT_FAMILY = "Libron";
 
@@ -79,7 +105,12 @@ export function resolve(spec: Spec) {
   const theme = spec.theme ?? "paper";
   const size = spec.size ?? "og";
   const layout = spec.layout ?? (spec.title ? "split" : "art");
-  return { ...spec, seed, motif, accent, accent2, theme, size, layout };
+  const position = spec.position ?? "center";
+  const background = spec.background ?? "theme";
+  const texture = spec.texture ?? true;
+  const fade = spec.fade ?? (layout === "art" && position !== "center");
+  const idPrefix = spec.idPrefix ?? "sc" + hash(JSON.stringify(spec)).toString(36);
+  return { ...spec, seed, motif, accent, accent2, theme, size, layout, position, background, texture, fade, idPrefix };
 }
 
 export function compose(input: Spec): { svg: string; width: number; height: number } {
@@ -88,28 +119,34 @@ export function compose(input: Spec): { svg: string; width: number; height: numb
   if (!(spec.theme in themes)) throw new Error(`Unknown theme "${spec.theme}". Pick one of: ${Object.keys(themes).join(", ")}`);
   for (const a of [spec.accent, spec.accent2])
     if (!(a in accents)) throw new Error(`Unknown accent "${a}". Pick one of: ${Object.keys(accents).join(", ")}`);
-  if (!(spec.size in sizes)) throw new Error(`Unknown size "${spec.size}". Pick one of: ${Object.keys(sizes).join(", ")}`);
-
-  const [W, H] = sizes[spec.size];
+  const [W, H] = parseSize(spec.size);
+  const preset = spec.size in sizes;
   const theme = themes[spec.theme];
   const c = colors(theme, accents[spec.accent], accents[spec.accent2]);
   const rng = makeRng(spec.seed);
   const noise = makeNoise(rng);
-  const unit = Math.min(W, H * 1.9) / 1200;
-  const sw = 1.7 * unit;
   const withText = spec.layout === "split" && !!spec.title;
   const landscape = W / H > 1.3;
 
   let cx = W / 2;
   let cy = H / 2;
-  let r = H * 0.33;
+  // The width caps keep art inside narrow canvases; none of the presets reach them.
+  let r = Math.min(H * 0.33, W * 0.33);
   if (withText && landscape) {
     cx = W * 0.71;
-    r = H * 0.33;
+    r = Math.min(H * 0.33, W * 0.19);
   } else if (withText) {
     cy = H * 0.4;
     r = W * 0.24;
+  } else {
+    const at = { left: [0.3, 0.5], center: [0.5, 0.5], right: [0.7, 0.5], top: [0.5, 0.32], bottom: [0.5, 0.68] }[spec.position];
+    if (!at) throw new Error(`Unknown position "${spec.position}". Pick one of: left, center, right, top, bottom`);
+    cx = W * at[0]!;
+    cy = H * at[1]!;
   }
+  // Presets keep their original scale; custom sizes scale lines with the art.
+  const unit = preset ? Math.min(W, H * 1.9) / 1200 : r / 208;
+  const sw = 1.7 * unit;
 
   const art = motifs[spec.motif].draw({ rng, noise, cx, cy, r, W, H, c, sw });
 
@@ -139,9 +176,17 @@ export function compose(input: Spec): { svg: string; width: number; height: numb
   const hazeB = `<ellipse cx="${f(hx)}" cy="${f(H * 0.95)}" rx="${f(r * 1.5)}" ry="${f(r * 0.9)}" fill="${c.a2}" opacity="${f(theme.haze * 0.8)}"/>`;
 
   // Fade the art out where the text sits so lines never cross the type.
+  // In an art layout, fade toward the side away from the art, where page content goes.
+  const away: Record<string, [number, number, number, number]> = {
+    left: [W * 0.64, 0, W * 0.42, 0],
+    right: [W * 0.36, 0, W * 0.58, 0],
+    top: [0, H * 0.66, 0, H * 0.46],
+    bottom: [0, H * 0.34, 0, H * 0.54],
+    center: [0, 0, 0, 0],
+  };
   let fade = "";
-  if (withText) {
-    const [x1, y1, x2, y2] = landscape ? [W * 0.3, 0, W * 0.56, 0] : [0, H * 0.76, 0, H * 0.6];
+  if (withText || (spec.layout === "art" && spec.fade && spec.position !== "center")) {
+    const [x1, y1, x2, y2] = !withText ? away[spec.position]! : landscape ? [W * 0.3, 0, W * 0.56, 0] : [0, H * 0.76, 0, H * 0.6];
     fade =
       `<linearGradient id="fade-g" gradientUnits="userSpaceOnUse" x1="${f(x1)}" y1="${f(y1)}" x2="${f(x2)}" y2="${f(y2)}">` +
       `<stop offset="0" stop-color="#000"/><stop offset="0.5" stop-color="#555"/><stop offset="1" stop-color="#fff"/></linearGradient>` +
@@ -195,11 +240,11 @@ export function compose(input: Spec): { svg: string; width: number; height: numb
 <filter id="grain" filterUnits="userSpaceOnUse" x="0" y="0" width="${W}" height="${H}"><feTurbulence type="fractalNoise" baseFrequency="${f(0.9 / unit)}" numOctaves="2" seed="7" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter>
 ${fade}
 </defs>
-<rect width="${W}" height="${H}" fill="${c.bg}"/>
-<g filter="url(#haze)">${hazeA}${hazeB}</g>
+${spec.background === "none" ? "" : `<rect width="${W}" height="${H}" fill="${c.bg}"/>`}
+${spec.texture ? `<g filter="url(#haze)">${hazeA}${hazeB}</g>` : ""}
 <g${fade ? ' mask="url(#fade)"' : ""}><g filter="url(#rough)">${art.back}${art.front}${subject}</g></g>
 ${text}
-<rect width="${W}" height="${H}" filter="url(#grain)" opacity="${theme.grain}" style="mix-blend-mode:overlay"/>
+${spec.texture && spec.background !== "none" ? `<rect width="${W}" height="${H}" filter="url(#grain)" opacity="${theme.grain}" style="mix-blend-mode:overlay"/>` : ""}
 </svg>`;
-  return { svg, width: W, height: H };
+  return { svg: prefixIds(svg, spec.idPrefix), width: W, height: H };
 }

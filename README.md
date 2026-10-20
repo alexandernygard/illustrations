@@ -31,7 +31,13 @@ site-cover render cover.json -o static/og.png
 site-cover render --spec '{"title":"Budget","motif":"wave"}' -o og.png --svg
 site-cover gallery -o gallery    # render the samples in src/samples.ts
 site-cover gallery --motifs      # every motif with the same title and colours, to compare
+site-cover render --spec '{"motif":"flow","size":"1920x800","position":"right"}' -o hero.webp --scale 2
 ```
+
+The same art works on the sites themselves: hero backgrounds, empty states, dividers. Custom sizes,
+art position, transparent backgrounds and WebP/SVG output are covered in the "Site art" section of
+[skill/SKILL.md](skill/SKILL.md). Apps can also `import { compose } from "site-cover"` to build SVGs
+at build time or in the browser; rasterising is in `site-cover/render`.
 
 The spec and the guide for writing one are in [skill/SKILL.md](skill/SKILL.md), which is also the
 skill agents load. Install it for Claude Code with:

@@ -1,23 +1,25 @@
 #!/usr/bin/env bun
 import { parseArgs } from "node:util";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve as resolvePath } from "node:path";
+import { dirname, extname, join, resolve as resolvePath } from "node:path";
 import { compose, resolve, sizes, type Spec } from "./compose";
 import { groups, motifs, type MotifName } from "./motifs";
 import { accents, themes } from "./palette";
-import { toPng } from "./render";
+import { toPng, toWebp } from "./render";
 import { samples } from "./samples";
 
 const usage = `site-cover: cohesive cover images for projects
 
-  site-cover render <spec.json> [-o cover.png] [--svg] [--scale 2] [--set key=value ...]
+  site-cover render <spec.json> [-o cover.png|.webp|.svg] [--svg] [--scale 2] [--set key=value ...]
   site-cover render --spec '{"title":"..."}' -o cover.png
   site-cover list                 motifs, themes and accents, with what each motif suggests
   site-cover gallery [-o dir]     render sample covers to look at
   site-cover gallery --motifs     render every motif with the same title and colours, to compare
 
-Spec fields: title, tagline, byline, motif, theme, accent, accent2, seed, size, layout, subject.
-See README.md for the full guide.`;
+The output format follows the extension of -o. --svg also writes an .svg next to a .png or .webp.
+
+Spec fields: title, tagline, byline, motif, theme, accent, accent2, seed, size, layout, position,
+background, texture, idPrefix, subject. See skill/SKILL.md for the full guide.`;
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -34,12 +36,16 @@ const { values, positionals } = parseArgs({
 
 const [cmd, file] = positionals;
 
-function render(spec: Spec, out: string, scale: number, svgToo: boolean) {
+async function render(spec: Spec, out: string, scale: number, svgToo: boolean) {
   const { svg, width, height } = compose(spec);
+  const ext = extname(out).toLowerCase();
   mkdirSync(dirname(out), { recursive: true });
-  writeFileSync(out, toPng(svg, scale));
-  if (svgToo) writeFileSync(out.replace(/\.png$/i, "") + ".svg", svg);
-  return { width: width * scale, height: height * scale };
+  if (ext === ".svg") writeFileSync(out, svg);
+  else if (ext === ".webp") writeFileSync(out, await toWebp(svg, scale));
+  else if (ext === ".png") writeFileSync(out, toPng(svg, scale));
+  else throw new Error(`Can't write "${ext}". Use .png, .webp or .svg.`);
+  if (svgToo && ext !== ".svg") writeFileSync(out.slice(0, -ext.length) + ".svg", svg);
+  return ext === ".svg" ? { width, height } : { width: width * scale, height: height * scale };
 }
 
 if (values.help || !cmd) {
@@ -59,13 +65,16 @@ if (values.help || !cmd) {
   else if (file) spec = JSON.parse(readFileSync(file, "utf8"));
   for (const kv of values.set ?? []) {
     const i = kv.indexOf("=");
-    (spec as Record<string, string>)[kv.slice(0, i)] = kv.slice(i + 1);
+    const v = kv.slice(i + 1);
+    (spec as Record<string, string | boolean>)[kv.slice(0, i)] = v === "true" ? true : v === "false" ? false : v;
   }
   const out = resolvePath(values.out ?? "cover.png");
   const scale = Number(values.scale ?? 1);
-  const { width, height } = render(spec, out, scale, !!values.svg);
+  const { width, height } = await render(spec, out, scale, !!values.svg);
   const r = resolve(spec);
   console.log(`Wrote ${out} (${width}x${height}, motif ${r.motif}, ${r.theme}, ${r.accent}+${r.accent2}, seed "${r.seed}")`);
+  // Meta tags only make sense for share images, not site art.
+  if (!(r.size in sizes) || extname(out) === ".svg") process.exit(0);
   const alt = [spec.title, spec.tagline].filter(Boolean).join(": ");
   console.log(`
 Add to <head>, with an absolute URL for the image:
@@ -82,7 +91,7 @@ Add to <head>, with an absolute URL for the image:
       )
     : samples;
   for (const [name, spec] of Object.entries(specs)) {
-    render(spec, join(dir, `${name}.png`), 1, true);
+    await render(spec, join(dir, `${name}.png`), 1, true);
     const r = resolve(spec);
     cards.push(`<figure><img src="${name}.png" alt=""><figcaption>${name} · ${r.motif} · ${r.theme} · ${r.accent}</figcaption></figure>`);
   }

@@ -12,10 +12,20 @@
     "check": "tsc --noEmit -p ."
   },
   "dependencies": {
-    "@resvg/resvg-js": "^2.6.2"
+    "@resvg/resvg-js": "^2.6.2",
+    "sharp": "^0.35.5"
   },
   "devDependencies": {
     "@types/bun": "latest",
     "typescript": "^5"
-  }
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./render": "./src/render.ts"
+  },
+  "files": [
+    "src",
+    "fonts",
+    "skill"
+  ]
 }
