@@ -1,0 +1,21 @@
+{
+  "name": "site-cover",
+  "version": "0.1.0",
+  "description": "Cohesive, artistic cover images (og:image) for Alex's projects, driven by a small JSON spec.",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "site-cover": "src/cli.ts"
+  },
+  "scripts": {
+    "gallery": "bun src/cli.ts gallery -o gallery",
+    "check": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5"
+  }
+}

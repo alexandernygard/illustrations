@@ -1,0 +1,5 @@
+node_modules
+gallery
+*.png
+!examples/*.png
+.DS_Store
